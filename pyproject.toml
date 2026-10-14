@@ -3,7 +3,7 @@ name = "mirrorcode-swarm-scanners"
 version = "0.1.0"
 description = "Inspect Scout scanner auditing MirrorCode swarm transcripts per agent"
 requires-python = ">=3.11"
-dependencies = ["inspect-scout", "pydantic"]
+dependencies = ["inspect-scout==0.5.5", "pydantic"]
 
 [project.entry-points.inspect_ai]
 mirrorcode_swarm_scanners = "mirrorcode_swarm_scanners._registry"

@@ -12,6 +12,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 from inspect_ai.model import GenerateConfig, get_model
 from inspect_scout import AnswerStructured, Result, Scanner, Transcript, llm_scanner, scanner
+from inspect_scout._llm_scanner.prompt import DEFAULT_SCANNER_TEMPLATE
 
 SCAN_MODEL = "openrouter/anthropic/claude-haiku-5.5"
 
@@ -72,20 +73,31 @@ async def max_reducer(results: list[Result]) -> Result:
     merged = {d: max(int(v.get(d) or 0) for v in vals) for d in DIMS}
     merged["findings"] = [f for v in vals for f in (v.get("findings") or [])]
     merged["n_windows"] = len(results)
+    merged["n_failed_windows"] = len(results) - len(vals)
     expl = " | ".join(r.explanation for r in results if r.explanation)
     refs = [ref for r in results for ref in (r.references or [])]
-    return Result(value=merged, explanation=expl, references=refs)
+    return Result(value=merged, explanation=expl, references=refs,
+                  metadata={"stop_reasons": [(r.metadata or {}).get("stop_reason") for r in results]})
 
 
 @scanner(timeline=True)
 def swarm_audit() -> Scanner[Transcript]:
-    return llm_scanner(
-        question=CONTEXT + "\n\n" + QUESTION,
-        answer=AnswerStructured(type=AgentAudit),
-        # HARD RULE: never send a prompt over 100k tokens (Haiku 5.5 price jumps 5x above 100k).
-        # Scout's token count undercounts Haiku by ~1.3x (90k window -> 120k real prompt), so cap at 60k.
-        context_window=60_000,
-        reducer=max_reducer,
-        # no prompt caching: each window is read once, cache writes cost +25% and never pay back
-        model=get_model(config=GenerateConfig(cache_prompt=False)),
-    )
+    async def scan(transcript: Transcript):
+        # Built per call so get_model() resolves the scan's configured model (set by the runner at scan time,
+        # not at scanner construction). cache_prompt=False: each window is read once, cache writes never pay back.
+        inner = llm_scanner(
+            question=CONTEXT + "\n\n" + QUESTION,
+            answer=AnswerStructured(type=AgentAudit),
+            # a single-string template stops llm_scanner forcing cache_prompt=True per call (bytes identical)
+            template=DEFAULT_SCANNER_TEMPLATE,
+            # only top-level agent spans (agent_k), never nested helper spans
+            depth=1,
+            # HARD RULE: never send a prompt over 100k tokens (Haiku 5.5 price jumps 5x above 100k).
+            # Scout undercounts Haiku ~1.3x (90k window -> 120k real prompt), so cap at 60k.
+            context_window=60_000,
+            reducer=max_reducer,
+            model=get_model(config=GenerateConfig(cache_prompt=False)),
+        )
+        return await inner(transcript)
+
+    return scan
