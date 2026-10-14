@@ -1,0 +1,20 @@
+name: mc-swarm-audit-pilot-kimi64
+scanners:
+  - package: "git+https://github.com/jrh-mann/mirrorcode-swarm-scanners@8286bbcb186a4481fb81537510d376ac492c751f"
+    name: mirrorcode_swarm_scanners
+    items:
+      - name: swarm_audit
+models:
+  - package: openai
+    name: openrouter
+    items:
+      - name: openrouter/anthropic/claude-haiku-5.5
+        args:
+          config:
+            cache_prompt: false
+max_transcripts: 1
+runner:
+  memory: 64Gi
+transcripts:
+  sources:
+    - eval_set_id: mc-kimi3-cfix-n64-r01-101-ljgy5kycxn6yz3hg
