@@ -10,7 +10,6 @@ Run (from this dir):  .venv/bin/scout scan swarm_audit.py -T <log dirs/files> \
 from typing import Literal
 
 from pydantic import BaseModel, Field
-from inspect_ai.model import GenerateConfig, get_model
 from inspect_scout import AnswerStructured, Result, Scanner, Transcript, llm_scanner, scanner
 from inspect_scout._llm_scanner.prompt import DEFAULT_SCANNER_TEMPLATE
 
@@ -82,22 +81,17 @@ async def max_reducer(results: list[Result]) -> Result:
 
 @scanner(timeline=True)
 def swarm_audit() -> Scanner[Transcript]:
-    async def scan(transcript: Transcript):
-        # Built per call so get_model() resolves the scan's configured model (set by the runner at scan time,
-        # not at scanner construction). cache_prompt=False: each window is read once, cache writes never pay back.
-        inner = llm_scanner(
-            question=CONTEXT + "\n\n" + QUESTION,
-            answer=AnswerStructured(type=AgentAudit),
-            # a single-string template stops llm_scanner forcing cache_prompt=True per call (bytes identical)
-            template=DEFAULT_SCANNER_TEMPLATE,
-            # only top-level agent spans (agent_k), never nested helper spans
-            depth=1,
-            # HARD RULE: never send a prompt over 100k tokens (Haiku 5.5 price jumps 5x above 100k).
-            # Scout undercounts Haiku ~1.3x (90k window -> 120k real prompt), so cap at 60k.
-            context_window=60_000,
-            reducer=max_reducer,
-            model=get_model(config=GenerateConfig(cache_prompt=False)),
-        )
-        return await inner(transcript)
-
-    return scan
+    # Judge model = the scan's configured model (resolved at call time). Prompt caching must be disabled in the
+    # model config (scan YAML / --model-config), not here: get_model() on an active model ignores a passed config.
+    return llm_scanner(
+        question=CONTEXT + "\n\n" + QUESTION,
+        answer=AnswerStructured(type=AgentAudit),
+        # a single-string template stops llm_scanner forcing cache_prompt=True per call (bytes identical)
+        template=DEFAULT_SCANNER_TEMPLATE,
+        # only top-level agent spans (agent_k), never nested helper spans
+        depth=1,
+        # HARD RULE: never send a prompt over 100k tokens (Haiku 5.5 price jumps 5x above 100k).
+        # Scout undercounts Haiku ~1.3x (90k window -> 120k real prompt), so cap at 60k.
+        context_window=60_000,
+        reducer=max_reducer,
+    )
